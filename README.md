@@ -20,19 +20,7 @@ on the [DigitalOcean OpenAPI Specification](https://github.com/digitalocean/open
 To install from pip:
 
 ```shell
-    pip install git+https://github.com/digitalocean/pydo.git
-```
-
-or, if repo is cloned locally:
-
-```shell
-    pip install /<PATH>/<TO>/pydo
-```
-
-To install from source:
-
-```shell
-make install
+    pip install pydo
 ```
 
 ## **`pydo` Quickstart**
@@ -70,7 +58,7 @@ ID: 123456, NAME: my_test_ssh_key, FINGERPRINT: 5c:74:7e:60:28:69:34:ca:dd:74:67
 ID: 123457, NAME: my_prod_ssh_key, FINGERPRINT: eb:76:c7:2a:d3:3e:80:5d:ef:2e:ca:86:d7:79:94:0d
 ```
 
-**Consult the full list of supported DigitalOcean API endpoints in [PyDo's documentation](https://pydo.readthedocs.io/en/latest/).**
+**Consult the full list of supported DigitalOcean API endpoints in [PyDo's documentation](https://docs.digitalocean.com/reference/pydo/).**
 
 **Note**: More working examples can be found [here](https://github.com/digitalocean/pydo/tree/main/examples).
 
@@ -80,13 +68,27 @@ Below is an example on handling pagination. One must parse the URL to find the
 next page.
 
 ```python
-resp = self.client.ssh_keys.list(per_page=50, page=page)
-pages = resp.links.pages
-if 'next' in pages.keys():
-    parsed_url = urlparse(pages['next'])
-    page = parse_qs(parsed_url.query)['page'][0]
-else:
-    paginated = False
+import os
+from pydo import Client
+from urllib.parse import urlparse, parse_qs
+
+client = Client(token=os.getenv("DIGITALOCEAN_TOKEN"))
+
+paginated = True
+page = 1
+
+while paginated:
+    resp = client.ssh_keys.list(per_page=50, page=page)
+
+    for k in resp["ssh_keys"]:
+        print(f"ID: {k['id']}, NAME: {k['name']}, FINGERPRINT: {k['fingerprint']}")
+
+    pages = resp.get("links", {}).get("pages", {})
+    if "next" in pages:
+        parsed_url = urlparse(pages["next"])
+        page = int(parse_qs(parsed_url.query)["page"][0])
+    else:
+        paginated = False
 ```
 
 #### Retries and Backoff
@@ -216,6 +218,27 @@ docker run -it --rm --name pydo -v $PWD/tests:/tests pydo:dev pytest tests/mocke
 #### `kubernetes.get_kubeconfig` Does not serialize response content
 
 In the generated python client, when calling client.kubernetes.get_kubeconfig(clust_id), the deserialization logic raises an error when the response content-type is applicaiton/yaml. We need to determine if the spec/schema can be configured such that the generator results in functions that properly handle the content. We will likely need to report the issue upstream to request support for the content-type.
+
+Workaround (with std lib httplib):
+
+```python
+from http.client import HTTPSConnection
+
+conn = HTTPSConnection('api.digitalocean.com')
+conn.request(
+    'GET',
+    f'/v2/kubernetes/clusters/{cluster_id}/kubeconfig',
+    headers={'Authorization': f'Bearer {os.environ["DIGITALOCEAN_TOKEN"]}'}
+)
+response = conn.getresponse()
+
+if response.getcode() > 400:
+    msg = 'Unable to get kubeconfig'
+    raise RuntimeError(msg)
+
+kube_config =  response.read().decode('utf-8')
+conn.close()
+```
 
 #### `invoices.get_pdf_by_uuid(invoice_uuid=invoice_uuid_param)` Does not return PDF
 
